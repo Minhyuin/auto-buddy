@@ -167,8 +167,14 @@ jobs:
           set -euo pipefail
           dc=(docker compose --project-directory . -f compose.yaml --env-file .ci-runtime.env)
           cleanup() {
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              "${dc[@]}" ps --all || true
+              "${dc[@]}" logs --no-color --tail=200 web worker migrate db || true
+            fi
             "${dc[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
             rm -rf .ci-secrets .ci-runtime.env
+            return "$rc"
           }
           trap cleanup EXIT
           rm -rf .ci-secrets .ci-runtime.env
@@ -216,7 +222,11 @@ jobs:
           export RUNTIME_ENV_FILE="$PWD/.ci-runtime.env"
 
           "${dc[@]}" up -d --no-build db migrate web worker
-          "${dc[@]}" wait migrate
+          # up already gates web/worker on service_completed_successfully.
+          # Inspect the stopped one-shot explicitly: compose wait can omit it.
+          migrate_id="$("${dc[@]}" ps --all --quiet migrate)"
+          test -n "$migrate_id"
+          test "$(docker inspect --format '{{.State.ExitCode}}' "$migrate_id")" = "0"
 
           web_id=""
           for _ in $(seq 1 60); do
