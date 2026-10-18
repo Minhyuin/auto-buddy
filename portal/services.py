@@ -15,15 +15,17 @@ def normalize_session(value):
     if not isinstance(value, dict):
         raise ValueError('凭证必须是 JSON 对象')
     if 'auth' not in value and 'account' not in value:
-        if set(value) - {'accessToken', 'uid', 'enterpriseId', 'domain'}:
+        if set(value) - {'accessToken', 'uid', 'enterpriseId', 'domain', 'endpoint'}:
             raise ValueError('凭证字段不受支持')
-        value = {'auth': {k: value[k] for k in ('accessToken', 'domain') if k in value}, 'account': {k: value[k] for k in ('uid', 'enterpriseId') if k in value}}
+        value = {'auth': {k: value[k] for k in ('accessToken', 'domain', 'endpoint') if k in value}, 'account': {k: value[k] for k in ('uid', 'enterpriseId') if k in value}}
     auth, account = value.get('auth'), value.get('account')
     if not isinstance(auth, dict) or not isinstance(account, dict):
         raise ValueError('缺少 auth 或 account 对象')
     token, uid = auth.get('accessToken'), account.get('uid')
     if isinstance(token, dict):
-        raise ValueError('服务器不支持依赖桌面客户端解密的加密信封，请提供兼容会话')
+        raise ValueError('检测到客户端加密信封中的 accessToken（$wbEncrypted 等）。仅上传 .info 无法在服务器解密；请在安装对应客户端的 Windows 本机解密后导入，或使用兼容的明文 CLI 会话。不要将 envelope 当作 Token。')
+    if isinstance(token, str) and token.strip().lower() in {'xx', 'xxx', 'redacted'}:
+        raise ValueError('accessToken 是脱敏占位值，不能恢复为真实凭据；请在安全连接下导入原始有效凭据。')
     if not isinstance(token, str) or not 0 < len(token) <= 32768 or not TOKEN_PATTERN.fullmatch(token):
         raise ValueError('accessToken 格式无效')
     if not isinstance(uid, str) or not re.fullmatch(r'[\x21-\x7e]{1,2048}', uid):

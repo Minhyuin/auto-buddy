@@ -82,11 +82,21 @@ def _decode_payload(raw):
     if len(raw.encode("utf-8")) > MAX_CREDENTIAL_BYTES:
         raise CredentialInputError("凭据内容超过 64 KB 上限。")
     try:
-        value = json.loads(raw)
-    except (ValueError, TypeError):
-        raise CredentialInputError("凭据 JSON 格式不正确。") from None
+        value = json.loads(raw.lstrip('\ufeff'))
+    except (ValueError, TypeError, RecursionError):
+        raise CredentialInputError("凭据 JSON 格式不正确或嵌套过深。") from None
     if not isinstance(value, dict):
         raise CredentialInputError("凭据必须是 JSON 对象。")
+    # Bound nesting independently of the Python version's JSON recursion limit.
+    pending = [(value, 0)]
+    while pending:
+        node, depth = pending.pop()
+        if depth > 32:
+            raise CredentialInputError("凭据 JSON 嵌套过深。")
+        if isinstance(node, dict):
+            pending.extend((child, depth + 1) for child in node.values())
+        elif isinstance(node, list):
+            pending.extend((child, depth + 1) for child in node)
     return value
 
 
@@ -209,15 +219,15 @@ class AccountForm(ScheduleForm):
                 "placeholder": '{"accessToken": "…", "uid": "…"}',
             }
         ),
-        help_text="支持扁平会话 {\"accessToken\": \"…\", \"uid\": \"…\"} 或 WorkBuddy 原生 auth/account JSON。",
+        help_text="支持简化 JSON，或 CodeBuddy / WorkBuddy 原生 auth/account JSON；自动提取必要字段，不保存 refreshToken 或个人资料。",
     )
     credentials_file = forms.FileField(
-        label="或上传凭据文件",
+        label="或上传原始 .info / .json 凭据文件",
         required=False,
         widget=forms.ClearableFileInput(
-            attrs={"class": "file-input", "accept": ".json,application/json"}
+            attrs={"class": "file-input", "accept": ".info,.json,application/json"}
         ),
-        help_text="UTF-8 JSON，最大 64 KB。文件内容不会被回显。",
+        help_text="直接选择 Tencent-Cloud.coding-copilot.info 或 workbuddy-desktop.info，无需改名或手工整理。最大 64 KB，支持 UTF-8 BOM；仅提取当前 account 与明文 accessToken。$wbEncrypted 需本机处理，xx 占位值不能登录。文件内容不会回显。",
     )
 
     field_order = [

@@ -25,7 +25,7 @@
 
 ## 凭据格式
 
-门户支持粘贴 JSON 或上传 UTF-8 JSON，最大 64 KiB。支持扁平会话或原生 `auth` / `account` 结构：
+门户支持粘贴 JSON，或在「添加账户 → 上传原始 .info / .json 凭据文件」中直接选择 Windows `Tencent-Cloud.coding-copilot.info` / `workbuddy-desktop.info`，无需重命名、手工删字段或复制 Token。按内容而非文件名解析 UTF-8 JSON（支持 BOM），最大 64 KiB；仅使用当前顶层 `auth` / `account`，不自动批量导入 `accounts` / `allAccounts`。支持扁平会话或原生结构：
 
 ```json
 {
@@ -41,7 +41,7 @@
 }
 ```
 
-以上都是占位符，不是可用凭据。仅保留必需字段及可选的 `domain`、`enterpriseId`；固定使用官方 HTTPS 地址，不接受任意 endpoint。**依赖桌面客户端解密的 accessToken 加密信封不能在无桌面服务器上直接使用**，应提供上游兼容的字符串会话。门户不会替你获取账号密码、绕过登录，也不会持久化 refreshToken。
+以上都是占位符，不是可用凭据；`xx` 等脱敏值无法还原，会被明确拒绝。仅保留 `auth.accessToken`、官方 `auth.endpoint`、`account.uid` 及可选 `auth.domain`、`account.enterpriseId`；固定使用官方 HTTPS 地址，不接受任意 endpoint。`refreshToken`、昵称、手机号及其他账户列表不会保存，原始文件不落盘。**只有 accessToken 为明文字符串才能直接导入**：Windows WorkBuddy 的 `$wbEncrypted` / `envelope` 不能靠 JSON 解析变成令牌，需要在对应 Windows 客户端本机解密后再导入，或使用兼容的明文 CLI 会话；服务器会给出该提示，不保存密文对象，也不尝试猜测密钥。无关字段如昵称已加密并不影响明文 accessToken 的导入。门户不会替你获取账号密码、绕过登录或刷新令牌。当前为 HTTP 时页面会提示传输风险，建议仅通过 HTTPS 或可信加密通道上传。
 
 账户编辑页不会回显已保存的 token；留空表示保留原凭据。表单验证失败时，提交的凭据也不会回显。可以用「在线认证检查」确认服务端是否接受当前会话；本地格式检查不等同于在线认证成功。
 
