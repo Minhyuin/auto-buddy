@@ -1400,7 +1400,7 @@ class Updater:
         digest = manifest["image"]["digest"]
         self.registry.verify(digest)
         image = f"{repository}@{digest}"
-        self.cosign.verify(image, digest)
+        self.cosign.verify(repository, digest)
         self._pull(image)
         self._verify_labels(image, release, manifest, allow_manual)
         return Target(release=release, manifest=manifest, digest=digest, image=image)

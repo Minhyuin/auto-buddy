@@ -82,6 +82,30 @@ class LiveTargetVerificationTests(TemporaryDirectoryTestCase):
             updater.baseline(args)
         self.assertIsNone(updater.state.read("current.json"))
 
+    def test_prepare_target_passes_unqualified_repository_to_cosign(self) -> None:
+        target = make_target()
+        entries = [{
+            "critical": {"image": {"docker-manifest-digest": target.digest}},
+            "optional": {
+                "Issuer": "https://token.actions.githubusercontent.com",
+                "Subject": "https://github.com/owner/auto-buddy/.github/workflows/release.yml@refs/tags/v1.2.3",
+            },
+        }]
+        runner = FakeRunner(lambda command: (0, json.dumps(entries).encode(), ""))
+        updater = make_updater(self, runner, FakeHttp(lambda url, headers: HttpResponse(200, {}, b"{}", url)))
+        updater._download_manifest = lambda release: target.manifest
+        updater.registry.verify = lambda digest: None
+        updater._pull = lambda image: None
+        updater._verify_labels = lambda *args: None
+
+        prepared = updater._prepare_target(target.release, allow_manual=False)
+
+        self.assertEqual(prepared.image, target.image)
+        self.assertEqual(len(runner.calls), 1)
+        command = runner.calls[0][0]
+        self.assertEqual(command[-1], target.image)
+        self.assertEqual(command[-1].count("@"), 1)
+
     def test_live_image_id_and_labels_match(self) -> None:
         target = make_target()
         image_id = "sha256:" + "a" * 64
