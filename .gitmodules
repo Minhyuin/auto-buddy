@@ -1,0 +1,4 @@
+[submodule "workbuddy-auto-signin"]
+	path = workbuddy-auto-signin
+	url = https://github.com/88lin/workbuddy-auto-signin
+	branch = main
