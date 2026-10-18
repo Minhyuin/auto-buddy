@@ -59,6 +59,14 @@
 
 **不要**把真实 WorkBuddy 登录文件、令牌、管理员密码、SSH 私钥、数据库转储、真实 `.env` 或密钥环提交到仓库。将仓库改为公开前应重新检查整个提交历史及 Release 产物。示例文件只使用占位符，测试只使用明确的 synthetic 数据。
 
+## 明文 HTTP 模式（默认关闭，不推荐）
+
+默认部署由 Caddy 终止 TLS，强制 HTTPS 跳转、`Secure` Cookie 和 HSTS。仅当确实需要「公网 IP + 独立端口、直接以 HTTP 访问」时，才设置 `AUTOBUDDY_ALLOW_HTTP=1`（默认 `0`）。**该开关本身不会把默认 Caddy 拓扑改成 HTTP**：明文访问需要另行部署一个受控的独立反向代理（配置见[部署运行手册](deployment/README.md)），应用端口仍只能绑定回环或内部地址，不得直接暴露到公网。开关只放宽传输层，不会改变单管理员登录、CSRF 校验、会话超时、Cookie HttpOnly/SameSite 设置和登录失败限速。
+
+明文 HTTP 下管理员账号、密码和会话 Cookie 全程未加密，链路上的任何人都能读取或篡改，因此默认关闭，推荐 HTTPS。开启时 `ALLOWED_HOSTS` 必须包含该访问主机（不含端口）；反向代理若只转发不含端口的 Host，浏览器 `Origin` 仍带端口，因此 `CSRF_TRUSTED_ORIGINS` 必须显式包含完整的 `http://主机:端口` 来源。`DJANGO_DEBUG` 仍必须为 `false`：生产调试模式依旧被拒绝，不能用它替代该开关。此前访问过同一主机名并收到 HSTS 的浏览器会继续强制或升级到 HTTPS（HSTS 不适用于 IP 地址），所以这类主机名只适合临时使用；`manage.py check --deploy` 在该模式下报告传输安全警告属于预期结果。
+
+浏览器的 Cookie 只按主机隔离、不区分端口，同一公网 IP 不同端口的多个门户会互相覆盖默认的 `sessionid` / `csrftoken`。因此本项目的会话与 CSRF Cookie 在所有模式下都使用独立名称 `autobuddy_session` / `autobuddy_csrftoken`，与其他门户共存时不会串号。
+
 ## 部署与运行
 
 完整的首次安装、域名/TLS、管理员初始化、备份、升级和回滚步骤见 [部署运行手册](deployment/README.md)；发布前检查 [Release 清单](deployment/RELEASE_CHECKLIST.md)。当前代码不预置真实域名、管理员密码或服务器 SSH 信息；提供服务器连接信息后再执行实际部署。

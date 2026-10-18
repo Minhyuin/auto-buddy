@@ -399,6 +399,41 @@ health checks. It forwards `X-Forwarded-Proto: https`; do not publish it on a
 public interface. Django exempts only `^health/$` from the HTTPS redirect so
 the container-local probe works over plain HTTP.
 
+### Plain-HTTP deployments (opt-in, discouraged)
+
+The stack above terminates TLS in Caddy and that remains the default; this
+switch does not reconfigure Caddy, publish the app port or change the health
+listener. A plain-HTTP deployment needs its own controlled reverse proxy on a
+separate public port, leaving Caddy, the health listener and any other site on
+the host untouched:
+
+* keep the `web` container port bound to loopback or an internal network only;
+  never publish it directly to the internet;
+* forward `Host` and `X-Forwarded-Proto $scheme` from the proxy, cap request
+  bodies at 96 KB (`client_max_body_size`), size `client_body_buffer_size` to at
+  least that cap and disable `proxy_request_buffering`, so a credential upload
+  never reaches the proxy's disk or logs. The 96 KB cap in
+  `deployment/caddy/Caddyfile` protects only the Caddy listener, and no HSTS
+  header may be added to this one;
+* set `ALLOWED_HOSTS` to the public host without a port (keep the loopback entry
+  used by the health probes). Because `Host $host` drops the port while the
+  browser's `Origin` keeps it, that proxy needs the exact `http://host:port`
+  origin in `CSRF_TRUSTED_ORIGINS`, or must forward a host header that includes
+  the port;
+* set `AUTOBUDDY_ALLOW_HTTP=1` in the runtime env file (default `0`). It
+  disables the HTTPS redirect, the `Secure` cookie flag and HSTS only; the
+  single-administrator login, CSRF checks, session timeout and login rate
+  limiting are unchanged.
+
+Plain HTTP sends the administrator password and the session cookie in cleartext,
+so anyone on the path can read or replay them. Treat the link as compromised,
+keep the listener as narrow as possible, and return to HTTPS as soon as
+possible. `DJANGO_DEBUG` must stay `false`; it is rejected outside synthetic
+tests and is never a substitute for this switch. Expect `manage.py check
+--deploy` transport warnings in this mode, and note that a browser with a cached
+HSTS policy for the hostname will still force HTTPS (HSTS does not cover IP
+addresses).
+
 ## 6. Release identity and supply chain
 
 The release workflow builds `linux/amd64`, pushes an immutable digest to GHCR,

@@ -11,6 +11,20 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'false').lower() == 'true'
 if DEBUG and not TESTING:
     raise ImproperlyConfigured('DJANGO_DEBUG=true is forbidden outside synthetic tests')
 
+# Plain-HTTP exposure is an explicit opt-out of transport enforcement for a
+# deliberate deployment served over http:// through a controlled reverse proxy.
+# It is never implied by DJANGO_DEBUG, which stays forbidden outside synthetic
+# tests. Unset or 0 keeps HTTPS enforced. Any other value is rejected instead of
+# silently choosing a mode.
+_PLAIN_HTTP_FLAGS = {
+    '': False, '0': False, 'false': False, 'no': False, 'off': False,
+    '1': True, 'true': True, 'yes': True, 'on': True,
+}
+_PLAIN_HTTP_VALUE = os.environ.get('AUTOBUDDY_ALLOW_HTTP', '').strip().lower()
+if _PLAIN_HTTP_VALUE not in _PLAIN_HTTP_FLAGS:
+    raise ImproperlyConfigured('AUTOBUDDY_ALLOW_HTTP must be 0 or 1')
+ALLOW_PLAIN_HTTP = _PLAIN_HTTP_FLAGS[_PLAIN_HTTP_VALUE]
+
 def secret_file(name):
     path = os.environ.get(name + '_FILE')
     if not path:
@@ -75,18 +89,30 @@ LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
 INITIAL_SETUP_DEADLINE = int(os.environ.get('INITIAL_SETUP_DEADLINE', '0') or '0')
+# Browsers scope cookies by host only, never by port, so several Django portals
+# on the same public IP would otherwise overwrite each other's default
+# 'sessionid' and 'csrftoken' cookies. The namespaced names apply in every mode.
+SESSION_COOKIE_NAME = 'autobuddy_session'
+CSRF_COOKIE_NAME = 'autobuddy_csrftoken'
 SESSION_COOKIE_AGE = 1800
 SESSION_SAVE_EVERY_REQUEST = True
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = 'Strict'
 CSRF_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = not (TESTING or DEBUG)
-CSRF_COOKIE_SECURE = not (TESTING or DEBUG)
-SECURE_SSL_REDIRECT = not (TESTING or DEBUG)
+# HTTPS transport enforcement is the default. ALLOW_PLAIN_HTTP relaxes only the
+# transport layer: login, CSRF, session lifetime, HttpOnly/SameSite cookie flags
+# and login rate limiting are unchanged.
+ENFORCE_HTTPS = not (TESTING or DEBUG or ALLOW_PLAIN_HTTP)
+SESSION_COOKIE_SECURE = ENFORCE_HTTPS
+CSRF_COOKIE_SECURE = ENFORCE_HTTPS
+SECURE_SSL_REDIRECT = ENFORCE_HTTPS
 SECURE_REDIRECT_EXEMPT = [r'^health/$']
-# Only the trusted reverse proxy may reach the app port in production.
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_HSTS_SECONDS = 31536000 if not (TESTING or DEBUG) else 0
+# Only the trusted reverse proxy may set this header. Plain-HTTP mode ignores
+# it: while cookies are non-Secure, neither a client nor a misconfigured proxy
+# should be able to make is_secure() claim https, and request.scheme must stay
+# http for CSRF origin checks and absolute redirects.
+SECURE_PROXY_SSL_HEADER = None if ALLOW_PLAIN_HTTP else ('HTTP_X_FORWARDED_PROTO', 'https')
+SECURE_HSTS_SECONDS = 31536000 if ENFORCE_HTTPS else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = False
 # Preload is a domain-owner commitment, not an application default.
