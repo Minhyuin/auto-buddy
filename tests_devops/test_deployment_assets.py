@@ -453,6 +453,8 @@ class DockerIgnoreTests(unittest.TestCase):
         self.assertIn("secrets", excluded)
         self.assertIn(".ci-secrets", excluded)
         self.assertIn(".ci-runtime.env", excluded)
+        for local_state in (".local", "artifacts", "staticfiles", "deployment/updater.env", "**/.env", "**/.env.*", "**/*.log"):
+            self.assertIn(local_state, excluded)
 
 
 if __name__ == "__main__":

@@ -33,6 +33,13 @@ deployment/runtime.env
 deployment/*.local.env
 backups
 .runtime
+.local
+artifacts
+staticfiles
+deployment/updater.env
+**/.env
+**/.env.*
+**/*.log
 release-manifest.json
 *.sqlite3
 *.sqlite3-*
