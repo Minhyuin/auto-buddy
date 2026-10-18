@@ -1,0 +1,117 @@
+{% extends "portal/base.html" %}
+{% load tz %}
+{% block title %}账户总览 · AutoBuddy{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">账户</p>
+    <h1>账户总览</h1>
+    <p class="muted">管理登录凭据、签到计划与执行记录。</p>
+  </div>
+  <a class="button button--primary" href="{% url 'portal:account_create' %}">添加账户</a>
+</div>
+
+<section class="stats" aria-label="运行概览">
+  <div class="stat">
+    <span class="stat-label">账户总数</span>
+    <strong class="stat-value">{{ total_accounts }}</strong>
+    <span class="stat-note">已启用 {{ enabled_accounts }}</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">待执行任务</span>
+    <strong class="stat-value">{{ active_runs }}</strong>
+    <span class="stat-note">排队中或执行中</span>
+  </div>
+  <div class="stat">
+    <span class="stat-label">执行器</span>
+    <strong class="stat-value stat-value--text">
+      {% if worker and worker.paused %}已暂停
+      {% elif worker_online %}在线
+      {% else %}离线{% endif %}
+    </strong>
+    <span class="stat-note">
+      {% if worker %}{% if worker_online %}最近心跳正常{% else %}最近未收到心跳{% endif %}
+      {% else %}尚未启动{% endif %}
+    </span>
+  </div>
+</section>
+
+{% if accounts %}
+<section class="account-grid" aria-label="账户列表">
+  {% for account in accounts %}
+  <article class="card account-card">
+    <header class="card-head">
+      <div class="card-title">
+        <h2><a href="{% url 'portal:account_detail' account.pk %}">{{ account.label }}</a></h2>
+        <span class="mono muted">{{ account.masked_uid }}</span>
+      </div>
+      <div class="badge-row">
+        {% if account.enabled %}
+        <span class="badge badge--success">已启用</span>
+        {% else %}
+        <span class="badge badge--muted">已停用</span>
+        {% endif %}
+        <span class="badge badge--outline">{{ account.get_mode_display }}</span>
+      </div>
+    </header>
+
+    <dl class="meta-grid">
+      <div>
+        <dt>每日签到</dt>
+        <dd>{{ account.schedule_time|time:"H:i" }} · {{ account.timezone }}</dd>
+      </div>
+      <div>
+        <dt>轮询</dt>
+        <dd>{% if account.poll_hours %}每 {{ account.poll_hours }} 小时{% else %}已关闭{% endif %}</dd>
+      </div>
+      <div>
+        <dt>下次签到</dt>
+        <dd>
+          {% if account.next_daily_at %}
+          {% timezone account.timezone %}{{ account.next_daily_at|date:"m-d H:i" }}{% endtimezone %}
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>下次轮询</dt>
+        <dd>
+          {% if account.next_poll_at %}
+          {% timezone account.timezone %}{{ account.next_poll_at|date:"m-d H:i" }}{% endtimezone %}
+          {% else %}—{% endif %}
+        </dd>
+      </div>
+    </dl>
+
+    <footer class="card-actions">
+      <a class="button button--small" href="{% url 'portal:account_detail' account.pk %}">详情</a>
+      <a class="button button--small button--quiet" href="{% url 'portal:account_edit' account.pk %}">编辑</a>
+      <form method="post" action="{% url 'portal:account_run' account.pk %}" class="inline-form">
+        {% csrf_token %}
+        <button class="button button--small" type="submit"{% if not account.enabled or account.id in active_account_ids %} disabled{% endif %}>立即执行</button>
+      </form>
+      <form method="post" action="{% url 'portal:account_check' account.pk %}" class="inline-form">
+        {% csrf_token %}
+        <button class="button button--small button--quiet" type="submit"{% if account.id in active_account_ids %} disabled{% endif %}>检查状态</button>
+      </form>
+      <a class="button button--small button--danger-quiet" href="{% url 'portal:account_delete' account.pk %}">删除</a>
+    </footer>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state">
+  <span class="empty-mark" aria-hidden="true">＋</span>
+  <h2>还没有账户</h2>
+  <p class="muted">添加第一个 WorkBuddy 账户后，即可设置自动签到计划。</p>
+  <a class="button button--primary" href="{% url 'portal:account_create' %}">添加账户</a>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>最近执行</h2>
+    <span class="muted">最近 25 条记录</span>
+  </div>
+  {% include "portal/_runs.html" with runs=recent_runs empty_text="还没有执行记录。" %}
+</section>
+{% endblock %}

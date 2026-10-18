@@ -1,0 +1,325 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional exact stable version (vX.Y.Z); must be newer than the latest tag"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: "Optional exact stable version (vX.Y.Z)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Require the main branch
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Refuse non-main refs
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::releases must run from refs/heads/main so the cosign identity is stable"
+            exit 1
+          fi
+
+  ci:
+    name: Reusable CI
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    name: Compute semantic version
+    needs: [guard, ci]
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      previous_version: ${{ steps.next.outputs.previous_version }}
+      bump: ${{ steps.next.outputs.bump }}
+      release: ${{ steps.next.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compute next version from Conventional Commits
+        id: next
+        env:
+          # github.event.inputs is empty for push; this avoids referencing the
+          # workflow_call-only `inputs` context on push events.
+          MANUAL_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "${MANUAL_VERSION:-}" ]; then
+            python scripts/next_version.py --version "$MANUAL_VERSION" --format github
+          else
+            python scripts/next_version.py --format github
+          fi
+      - name: Explain no-release result
+        if: steps.next.outputs.release != 'true'
+        run: |
+          echo "No release-worthy Conventional Commits since ${{ steps.next.outputs.previous_version }}."
+          echo "Nothing to build or publish; the workflow will exit successfully."
+
+  prepare:
+    name: Prepare release metadata
+    needs: [version]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    outputs:
+      image_repository: ${{ steps.meta.outputs.image_repository }}
+      upstream_commit: ${{ steps.meta.outputs.upstream_commit }}
+      upstream_tag: ${{ steps.meta.outputs.upstream_tag }}
+      backward_compatible: ${{ steps.meta.outputs.backward_compatible }}
+      manual_approval_required: ${{ steps.meta.outputs.manual_approval_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Resolve gitlink and migration policy
+        id: meta
+        run: |
+          set -euo pipefail
+          gitlink="$(git ls-tree HEAD workbuddy-auto-signin | awk '{print $3}')"
+          if ! printf '%s' "$gitlink" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::workbuddy-auto-signin is not a pinned gitlink"
+            exit 1
+          fi
+          submodule_commit="$(git -C workbuddy-auto-signin rev-parse HEAD)"
+          if [ "$gitlink" != "$submodule_commit" ]; then
+            echo "::error::submodule HEAD ($submodule_commit) does not match gitlink ($gitlink)"
+            exit 1
+          fi
+          git -C workbuddy-auto-signin fetch --tags --quiet origin || true
+          upstream_tag="$(git -C workbuddy-auto-signin tag --points-at HEAD --list 'v*' | sort -V | tail -n 1 || true)"
+
+          python scripts/release_manifest.py policy --format json > policy.json
+          image_repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+
+          {
+            echo "image_repository=$image_repository"
+            echo "upstream_commit=$gitlink"
+            echo "upstream_tag=$upstream_tag"
+          } >> "$GITHUB_OUTPUT"
+
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+
+          with open("policy.json", encoding="utf-8") as handle:
+              policy = json.load(handle)
+          print(f"backward_compatible={str(policy['backward_compatible']).lower()}")
+          print(f"manual_approval_required={str(policy['manual_approval_required']).lower()}")
+          PY
+
+          echo "Release metadata:"
+          echo "  gitlink:    $gitlink"
+          echo "  upstream:   ${upstream_tag:-<no exact tag>}"
+          echo "  image:      $image_repository"
+          cat policy.json
+
+  build:
+    name: Build, push and sign image
+    needs: [version, prepare]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by commit SHA
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ needs.prepare.outputs.image_repository }}:sha-${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.auto-buddy.upstream-commit=${{ needs.prepare.outputs.upstream_commit }}
+          build-args: |
+            APP_VERSION=${{ needs.version.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            CREATED=${{ github.event.repository.pushed_at || github.run_started_at }}
+            SOURCE_URL=https://github.com/${{ github.repository }}
+            MIGRATIONS_BACKWARD_COMPATIBLE=${{ needs.prepare.outputs.backward_compatible }}
+            MANUAL_APPROVAL_REQUIRED=${{ needs.prepare.outputs.manual_approval_required }}
+            UPSTREAM_COMMIT=${{ needs.prepare.outputs.upstream_commit }}
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign the immutable digest with keyless OIDC
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image_repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "$IMAGE"
+      - name: Verify the signature with strict identity
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image_repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          IDENTITY="^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/release\\.yml@refs/heads/main$"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE"
+
+  manifest:
+    name: Generate release manifest
+    needs: [version, prepare, build]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Write and validate release-manifest.json
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          COMMIT: ${{ github.sha }}
+          IMAGE_REPOSITORY: ${{ needs.prepare.outputs.image_repository }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          UPSTREAM_COMMIT: ${{ needs.prepare.outputs.upstream_commit }}
+          UPSTREAM_TAG: ${{ needs.prepare.outputs.upstream_tag }}
+          SOURCE_URL: https://github.com/${{ github.repository }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          args=(
+            write
+            --version "$VERSION"
+            --commit "$COMMIT"
+            --image-repository "$IMAGE_REPOSITORY"
+            --digest "$IMAGE_DIGEST"
+            --upstream-commit "$UPSTREAM_COMMIT"
+            --source-url "$SOURCE_URL"
+            --run-id "$RUN_ID"
+            --workflow-ref "$WORKFLOW_REF"
+            --output release-manifest.json
+          )
+          if [ -n "${UPSTREAM_TAG:-}" ]; then
+            args+=(--upstream-tag "$UPSTREAM_TAG")
+          fi
+          python scripts/release_manifest.py "${args[@]}"
+          python scripts/release_manifest.py validate --manifest release-manifest.json
+          sha256sum release-manifest.json | awk '{print $1}' > manifest.sha256
+          {
+            echo "Release-Manifest-SHA256: $(cat manifest.sha256)"
+            echo
+            cat release-manifest.json
+          } > release-notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: |
+            release-manifest.json
+            manifest.sha256
+            release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Promote tags and create GitHub release
+    needs: [version, prepare, build, manifest]
+    if: needs.version.outputs.release == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-manifest
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v3
+      - name: Re-verify the signed digest before promoting tags
+        env:
+          IMAGE: ${{ needs.prepare.outputs.image_repository }}@${{ needs.build.outputs.digest }}
+        run: |
+          IDENTITY="^https://github\\.com/${GITHUB_REPOSITORY}/\\.github/workflows/release\\.yml@refs/heads/main$"
+          cosign verify \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$IMAGE"
+      - name: Validate manifest and promotion inputs
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+          MANIFEST_SHA: ${{ hashFiles('release-manifest.json') }}
+        run: |
+          set -euo pipefail
+          python scripts/release_manifest.py validate --manifest release-manifest.json
+          test "$(cat manifest.sha256)" = "$MANIFEST_SHA"
+          python - <<'PY'
+          import json, os
+          manifest = json.load(open("release-manifest.json", encoding="utf-8"))
+          assert manifest["version"] == os.environ["VERSION"], manifest["version"]
+          assert manifest["image"]["digest"] == os.environ["IMAGE_DIGEST"], manifest["image"]["digest"]
+          PY
+      - name: Promote immutable digest to version, stable and latest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          IMAGE_REPOSITORY: ${{ needs.prepare.outputs.image_repository }}
+          IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${IMAGE_REPOSITORY}:${VERSION}" \
+            -t "${IMAGE_REPOSITORY}:stable" \
+            -t "${IMAGE_REPOSITORY}:latest" \
+            "${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+      - name: Create GitHub release (tag created only now)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$VERSION" \
+            --target "$GITHUB_SHA" \
+            --title "$VERSION" \
+            --notes-file release-notes.md
+          gh release upload "$VERSION" \
+            release-manifest.json manifest.sha256 \
+            --clobber

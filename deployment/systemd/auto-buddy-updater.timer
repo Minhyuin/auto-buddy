@@ -1,0 +1,14 @@
+[Unit]
+Description=Run the AutoBuddy verified release updater periodically
+Documentation=file:///opt/auto-buddy/deployment/README.md
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=60
+AccuracySec=30s
+Persistent=true
+Unit=auto-buddy-updater.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+{% extends "portal/base.html" %}
+{% block title %}页面不存在 · AutoBuddy{% endblock %}
+{% block content %}
+<section class="empty-state">
+  <p class="error-code">404</p>
+  <h1>页面不存在</h1>
+  <p class="muted">链接可能已失效，或地址输入有误。</p>
+  {% if user.is_authenticated %}
+  <a class="button button--primary" href="{% url 'portal:dashboard' %}">返回账户总览</a>
+  {% else %}
+  <a class="button button--primary" href="{% url 'portal:login' %}">前往登录</a>
+  {% endif %}
+</section>
+{% endblock %}

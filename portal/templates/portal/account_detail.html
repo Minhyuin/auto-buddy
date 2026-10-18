@@ -1,0 +1,86 @@
+{% extends "portal/base.html" %}
+{% load tz %}
+{% block title %}{{ account.label }} · AutoBuddy{% endblock %}
+{% block content %}
+{% if not credentials_readable %}
+<div class="alert alert--error" role="alert">
+  <strong>凭据不可读。</strong> 当前凭据无法使用现有密钥解密，请编辑账户并重新导入凭据。
+</div>
+{% endif %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow">账户详情</p>
+    <h1>{{ account.label }}</h1>
+    <p class="mono muted">{{ account.masked_uid }}</p>
+  </div>
+  <div class="page-actions">
+    <a class="button button--quiet" href="{% url 'portal:account_edit' account.pk %}">编辑账户</a>
+    <a class="button button--danger-quiet" href="{% url 'portal:account_delete' account.pk %}">删除账户</a>
+  </div>
+</div>
+
+<div class="detail-grid">
+  <section class="panel" aria-labelledby="status-title">
+    <div class="panel-head">
+      <h2 id="status-title">执行状态</h2>
+      {% if account.enabled %}
+      <span class="badge badge--success">已启用</span>
+      {% else %}
+      <span class="badge badge--muted">已停用</span>
+      {% endif %}
+    </div>
+
+    <dl class="meta-grid meta-grid--detail">
+      <div><dt>执行模式</dt><dd>{{ account.get_mode_display }}</dd></div>
+      <div><dt>每日签到</dt><dd>{{ account.schedule_time|time:"H:i" }} · {{ account.timezone }}</dd></div>
+      <div><dt>轮询间隔</dt><dd>{% if account.poll_hours %}每 {{ account.poll_hours }} 小时{% else %}已关闭{% endif %}</dd></div>
+      <div>
+        <dt>下次签到</dt>
+        <dd>{% if account.next_daily_at %}{% timezone account.timezone %}{{ account.next_daily_at|date:"Y-m-d H:i" }}{% endtimezone %}{% else %}—{% endif %}</dd>
+      </div>
+      <div>
+        <dt>下次轮询</dt>
+        <dd>{% if account.next_poll_at %}{% timezone account.timezone %}{{ account.next_poll_at|date:"Y-m-d H:i" }}{% endtimezone %}{% else %}—{% endif %}</dd>
+      </div>
+      <div>
+        <dt>最近更新</dt>
+        <dd>{% timezone account.timezone %}{{ account.updated_at|date:"Y-m-d H:i" }}{% endtimezone %}</dd>
+      </div>
+    </dl>
+
+    <div class="panel-actions">
+      <form method="post" action="{% url 'portal:account_run' account.pk %}" class="inline-form">
+        {% csrf_token %}
+        <button class="button button--primary" type="submit"{% if not account.enabled or active_run %} disabled{% endif %}>立即执行</button>
+      </form>
+      <form method="post" action="{% url 'portal:account_check' account.pk %}" class="inline-form">
+        {% csrf_token %}
+        <button class="button button--quiet" type="submit"{% if active_run %} disabled{% endif %}>检查在线状态</button>
+      </form>
+      {% if active_run %}<span class="help-text">已有待执行或执行中的任务，完成后可再次检查。</span>
+      {% elif not account.enabled %}<span class="help-text">账户已停用，启用后可立即执行；仍可检查在线状态。</span>{% endif %}
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="schedule-title">
+    <div class="panel-head">
+      <h2 id="schedule-title">执行计划</h2>
+      <span class="muted">按账户时区计算</span>
+    </div>
+    <form method="post" action="{% url 'portal:account_schedule' account.pk %}" class="form-stack form-stack--compact">
+      {% csrf_token %}
+      {% include "portal/_form.html" with form=schedule_form %}
+      <button class="button button--primary" type="submit">保存计划</button>
+    </form>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>执行记录</h2>
+    <span class="muted">最近 50 条</span>
+  </div>
+  {% include "portal/_runs.html" with runs=runs empty_text="该账户还没有执行记录。" %}
+</section>
+{% endblock %}

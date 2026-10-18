@@ -1,0 +1,65 @@
+# Keep the build context to what the runtime image needs. Anything that could
+# contain local secrets, VCS data or developer state never enters the context.
+.git
+.gitignore
+.github
+.gitmodules
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+**/*.so
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+coverage.xml
+htmlcov
+*.log
+.DS_Store
+Thumbs.db
+
+# Local configuration, generated secrets, runtime state and backups.
+.env
+.env.*
+.ci-secrets
+.ci-runtime.env
+.ci-*
+.test-output.txt
+secrets
+deployment/secrets
+deployment/.gitignore
+deployment/runtime.env
+deployment/*.local.env
+backups
+.runtime
+release-manifest.json
+*.sqlite3
+*.sqlite3-*
+*.dump
+*.sql
+*.pem
+*.key
+*.info
+
+# Development-only trees.
+tests
+tests_devops
+workbuddy-auto-signin/.git
+workbuddy-auto-signin/.github
+workbuddy-auto-signin/assets
+workbuddy-auto-signin/docs
+workbuddy-auto-signin/tests
+workbuddy-auto-signin/install-windows.ps1
+workbuddy-auto-signin/*.md
+**/*.md
+
+# Deployment material that the runtime does not need.
+deployment/systemd
+deployment/install.sh
+deployment/*.example
+deployment/updater
+deployment/RELEASE_CHECKLIST.md
+deployment/release-manifest.schema.json
+compose.yaml
+Dockerfile

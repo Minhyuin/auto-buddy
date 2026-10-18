@@ -1,0 +1,39 @@
+{% extends "portal/base.html" %}
+{% block title %}管理员登录 · AutoBuddy{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-card" aria-labelledby="login-title">
+  <div class="auth-brand">
+    <span class="brand-mark brand-mark--large" aria-hidden="true">AB</span>
+    <p class="eyebrow">AutoBuddy</p>
+    <h1 id="login-title">管理员登录</h1>
+    <p class="muted">仅限已授权的管理员访问。登录状态会在 30 分钟无操作后失效。</p>
+  </div>
+
+  <form method="post" action="{% url 'portal:login' %}" class="form-stack" autocomplete="off">
+    {% csrf_token %}
+    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+
+    {% if form.non_field_errors %}
+    <div class="form-errors" role="alert">
+      {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="field{% if form.username.errors %} field--error{% endif %}">
+      <label for="{{ form.username.id_for_label }}">管理员账号</label>
+      {{ form.username }}
+      {% for error in form.username.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+
+    <div class="field{% if form.password.errors %} field--error{% endif %}">
+      <label for="{{ form.password.id_for_label }}">密码</label>
+      {{ form.password }}
+      {% for error in form.password.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+
+    <button class="button button--primary button--wide" type="submit">登录</button>
+    <p class="form-note">连续 5 次登录失败后，当前来源地址将被锁定 15 分钟。</p>
+  </form>
+</section>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends "portal/base.html" %}
+{% block title %}删除账户 · {{ account.label }} · AutoBuddy{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">危险操作</p>
+    <h1>删除账户</h1>
+    <p class="muted">此操作不可撤销。</p>
+  </div>
+  <a class="button button--quiet" href="{% url 'portal:account_detail' account.pk %}">返回账户</a>
+</div>
+
+<section class="panel danger-panel">
+  <h2>{{ account.label }}</h2>
+  <p class="mono muted">{{ account.masked_uid }}</p>
+
+  {% if active_runs %}
+  <div class="alert alert--error" role="alert">
+    <strong>无法删除。</strong> 该账户仍有待执行或执行中的任务。请等待任务结束，或先暂停执行器并等待任务排空。
+  </div>
+  <div class="form-actions">
+    <a class="button button--quiet" href="{% url 'portal:account_detail' account.pk %}">返回账户</a>
+  </div>
+  {% else %}
+  <p>删除账户会同时删除其 <strong>{{ run_count }}</strong> 条执行记录与审计关联，且无法恢复。</p>
+
+  {% if account.enabled %}
+  <div class="alert alert--warning">
+    <strong>该账户仍处于启用状态。</strong> 删除前请确认不再需要自动签到。
+  </div>
+  <form method="post" action="{% url 'portal:account_delete' account.pk %}" class="form-stack">
+    {% csrf_token %}
+    <div class="field field--checkbox">
+      <label class="checkbox-label" for="confirm-delete">
+        <input type="checkbox" name="confirm" value="yes" id="confirm-delete" required>
+        <span>我确认删除该账户及其全部历史记录</span>
+      </label>
+    </div>
+    <div class="form-actions">
+      <button class="button button--danger" type="submit">确认删除</button>
+      <a class="button button--quiet" href="{% url 'portal:account_detail' account.pk %}">取消</a>
+    </div>
+  </form>
+  {% else %}
+  <div class="alert alert--warning">
+    <strong>该账户已停用。</strong> 确认后将通过级联删除清理其全部历史记录。
+  </div>
+  <form method="post" action="{% url 'portal:account_delete' account.pk %}" class="form-stack">
+    {% csrf_token %}
+    <div class="form-actions">
+      <button class="button button--danger" type="submit">删除已停用账户</button>
+      <a class="button button--quiet" href="{% url 'portal:account_detail' account.pk %}">取消</a>
+    </div>
+  </form>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

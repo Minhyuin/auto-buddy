@@ -1,0 +1,33 @@
+{% extends "portal/base.html" %}
+{% block title %}{% if is_create %}添加账户{% else %}编辑账户{% endif %} · AutoBuddy{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">{% if is_create %}新建{% else %}编辑{% endif %}</p>
+    <h1>{% if is_create %}添加账户{% else %}编辑账户{% endif %}</h1>
+    <p class="muted">凭据仅用于生成加密会话，保存后无法再次查看。</p>
+  </div>
+  <a class="button button--quiet" href="{% if account %}{% url 'portal:account_detail' account.pk %}{% else %}{% url 'portal:dashboard' %}{% endif %}">返回</a>
+</div>
+
+<section class="panel form-panel">
+  <form method="post" enctype="multipart/form-data" class="form-stack" autocomplete="off">
+    {% csrf_token %}
+    {% include "portal/_form.html" %}
+
+    <p class="form-note">
+      {% if is_create %}
+      支持两种凭据格式：扁平会话 <span class="mono">{"accessToken": "…", "uid": "…"}</span>，或 WorkBuddy 原生 <span class="mono">auth/account</span> JSON。
+      {% else %}
+      编辑时凭据输入留空，表示沿用现有凭据；如需替换，请粘贴 JSON 或上传文件。
+      {% endif %}
+      文件与文本内容均不会回显。
+    </p>
+
+    <div class="form-actions">
+      <button class="button button--primary" type="submit">保存</button>
+      <a class="button button--quiet" href="{% if account %}{% url 'portal:account_detail' account.pk %}{% else %}{% url 'portal:dashboard' %}{% endif %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

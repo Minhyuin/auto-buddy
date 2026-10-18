@@ -1,0 +1,6 @@
+# The root .gitignore excludes every directory named `secrets/`. The files in
+# `deployment/secrets/` are deliberately invalid documentation placeholders,
+# never credentials; re-include only the `.example` files.
+!secrets/
+secrets/*
+!secrets/*.example

@@ -1,0 +1,4 @@
+# Test-only dependencies for the deployment/updater/static-asset suite.
+# Django itself is installed from the repository's requirements.txt in CI.
+PyYAML>=6.0,<7
+ruff==0.17.1

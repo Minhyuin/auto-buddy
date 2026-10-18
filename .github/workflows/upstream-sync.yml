@@ -1,0 +1,259 @@
+name: Upstream stable release sync
+
+on:
+  schedule:
+    # Daily, off the hour to avoid GitHub Actions load spikes.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    # This job executes code from the upstream release and therefore gets a
+    # read-only token. It must not share a job with the push/PR steps.
+    name: Verify the upstream release at its pinned tag
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      skip: ${{ steps.upstream.outputs.skip }}
+      tag: ${{ steps.upstream.outputs.tag }}
+      branch: ${{ steps.upstream.outputs.branch }}
+      current_gitlink: ${{ steps.checkout.outputs.current_gitlink }}
+      new_gitlink: ${{ steps.checkout.outputs.new_gitlink }}
+      already_current: ${{ steps.checkout.outputs.already_current }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Find the latest formal upstream release
+        id: upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$(gh api repos/88lin/workbuddy-auto-signin/releases/latest --jq '.tag_name // empty' || true)"
+          if [ -z "$tag" ]; then
+            echo "No upstream stable release found; nothing to sync."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+            echo "::error::upstream latest release is not a stable vX.Y.Z tag: $tag"
+            exit 1
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          # Include the run and attempt so a stale closed PR/branch from an
+          # earlier attempt can never make the next push non-fast-forward.
+          echo "branch=chore/upstream-${tag}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+          echo "Upstream stable release: $tag"
+
+      - name: Check out the upstream release tag
+        id: checkout
+        if: steps.upstream.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.upstream.outputs.tag }}"
+          current="$(git ls-tree HEAD workbuddy-auto-signin | awk '{print $3}')"
+          git -C workbuddy-auto-signin fetch --force --depth 1 origin "refs/tags/${tag}:refs/tags/${tag}"
+          git -C workbuddy-auto-signin checkout --detach "refs/tags/${tag}"
+          new="$(git -C workbuddy-auto-signin rev-parse HEAD)"
+          if ! printf '%s' "$new" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::upstream checkout did not resolve to a commit"
+            exit 1
+          fi
+          echo "current_gitlink=$current" >> "$GITHUB_OUTPUT"
+          echo "new_gitlink=$new" >> "$GITHUB_OUTPUT"
+          if [ "$current" = "$new" ]; then
+            echo "already_current=true" >> "$GITHUB_OUTPUT"
+            echo "Parent gitlink already points at upstream $tag ($new); nothing to do."
+          else
+            echo "already_current=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run upstream tests at the pinned tag
+        if: steps.upstream.outputs.skip != 'true' && steps.checkout.outputs.already_current == 'false'
+        working-directory: workbuddy-auto-signin
+        run: python -m unittest discover -s tests -v
+
+  sync:
+    # No upstream source is executed in this job. It only stages the gitlink
+    # object from the verified commit, so the write token is never exposed to
+    # the tested upstream code.
+    name: Commit the gitlink and open a PR
+    needs: verify
+    if: needs.verify.outputs.skip != 'true' && needs.verify.outputs.already_current == 'false'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for an already-open sync PR
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Match the open PR by stable tag prefix, not the deterministic
+          # branch name from an older run. Closed stale branches are ignored.
+          prefix="chore/upstream-${{ needs.verify.outputs.tag }}-"
+          pr="$(gh pr list --state open --limit 100 --json headRefName,url \
+            | jq -r --arg prefix "$prefix" '[.[] | select(.headRefName | startswith($prefix))][0].url // empty')"
+          if [ -n "$pr" ]; then
+            echo "A sync PR for this tag already exists: $pr"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit only the gitlink
+        id: commit
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ needs.verify.outputs.tag }}"
+          new="${{ needs.verify.outputs.new_gitlink }}"
+          if ! printf '%s' "$new" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::refusing to write an invalid gitlink: $new"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git update-index --cacheinfo "160000,${new},workbuddy-auto-signin"
+          changed="$(git diff --cached --name-only)"
+          if [ "$changed" != "workbuddy-auto-signin" ]; then
+            echo "::error::refusing to commit changes other than the submodule gitlink: ${changed:-<none>}"
+            exit 1
+          fi
+          # fix(...) makes the parent next_version.py produce a patch release
+          # when this PR is merged to main. chore(...) would deliberately skip
+          # semantic release, so an upstream-only update would never ship.
+          git commit -m "fix(upstream): update workbuddy-auto-signin to ${tag}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git --no-pager show --stat --oneline HEAD
+          git ls-tree HEAD workbuddy-auto-signin
+
+      - name: Push the bot branch
+        if: steps.existing.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:refs/heads/${{ needs.verify.outputs.branch }}"
+
+      - name: Open the pull request
+        id: pr
+        if: steps.existing.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          body=$(printf '%s\n' \
+            "Automated update of the \`workbuddy-auto-signin\` gitlink to the formal upstream release **${{ needs.verify.outputs.tag }}**." \
+            "" \
+            "- Previous gitlink: \`${{ needs.verify.outputs.current_gitlink }}\`" \
+            "- New gitlink: \`${{ needs.verify.outputs.new_gitlink }}\`" \
+            "- Upstream release: https://github.com/88lin/workbuddy-auto-signin/releases/tag/${{ needs.verify.outputs.tag }}" \
+            "" \
+            "This PR changes **only** the submodule gitlink; no upstream file is edited. A separate read-only job ran the upstream test suite at the pinned tag. CI is explicitly dispatched for this branch because branches pushed with \`GITHUB_TOKEN\` do not trigger workflows." \
+            "" \
+            "If auto-merge is unavailable, review the dispatched CI result and merge manually. Production still needs a tested patch release and the host updater; this PR does not deploy anything.")
+          pr_url="$(gh pr create \
+            --base main \
+            --head "${{ needs.verify.outputs.branch }}" \
+            --title "fix(upstream): update workbuddy-auto-signin to ${{ needs.verify.outputs.tag }}" \
+            --body "$body")"
+          echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+          echo "PR: $pr_url"
+
+      - name: Explicitly run CI for the bot branch
+        if: steps.pr.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          branch="${{ needs.verify.outputs.branch }}"
+          parent_sha="${{ steps.commit.outputs.sha }}"
+          if ! printf '%s' "$parent_sha" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::refusing to watch CI for an invalid parent commit: $parent_sha"
+            exit 1
+          fi
+          gh workflow run ci.yml --ref "$branch"
+          run_id=""
+          for _ in $(seq 1 30); do
+            # Match the explicit workflow_dispatch run for the parent commit
+            # that changed the gitlink, not the gitlink SHA (that is the
+            # submodule repository's commit).
+            run_id="$(gh run list --workflow=ci.yml --branch "$branch" \
+              --event workflow_dispatch --commit "$parent_sha" --limit 1 \
+              --json databaseId --jq '.[0].databaseId // empty')"
+            if [ -n "$run_id" ]; then
+              break
+            fi
+            sleep 10
+          done
+          if [ -z "$run_id" ]; then
+            echo "::error::could not find the explicitly dispatched CI run"
+            exit 1
+          fi
+          echo "Watching CI run $run_id"
+          gh run watch "$run_id" --exit-status
+
+      - name: Attempt auto-merge with a documented fallback
+        if: steps.pr.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ steps.pr.outputs.url }}
+        run: |
+          set -euo pipefail
+          auto_merge=false
+          if gh pr merge "$PR_URL" --auto --squash; then
+            auto_merge=true
+            echo "Auto-merge enabled; it will wait for required checks."
+          else
+            echo "::warning::Auto-merge is unavailable for this repository or PR."
+            echo "The sync PR remains open. Review the explicitly dispatched CI run and merge it manually."
+            gh pr comment "$PR_URL" --body "Auto-merge could not be enabled (repository setting or branch protection). Please review the explicitly dispatched CI run and merge this gitlink-only PR manually. Merging it by hand pushes main and triggers Release normally."
+          fi
+
+          if [ "$auto_merge" = true ]; then
+            merged=false
+            for _ in $(seq 1 60); do
+              state="$(gh pr view "$PR_URL" --json state --jq '.state // empty')"
+              if [ "$state" = "MERGED" ]; then
+                merged=true
+                break
+              fi
+              if [ "$state" = "CLOSED" ]; then
+                break
+              fi
+              sleep 10
+            done
+            if [ "$merged" = true ]; then
+              # A GITHUB_TOKEN-created merge does not trigger the push workflow.
+              # Dispatch Release only after the PR is confirmed MERGED, never before.
+              echo "PR merged; dispatching Release for main because GITHUB_TOKEN merges do not trigger push workflows."
+              gh workflow run release.yml --ref main
+            else
+              echo "::warning::Auto-merge was enabled but the PR was not confirmed MERGED within the wait window."
+              gh pr comment "$PR_URL" --body "Auto-merge is enabled but this PR was not confirmed merged within ten minutes. If checks are still running, let them finish; after a human merge the normal push event triggers Release. Do not dispatch Release before the merge exists."
+            fi
+          fi

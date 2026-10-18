@@ -1,0 +1,14 @@
+{% extends "portal/base.html" %}
+{% block title %}无权访问 · AutoBuddy{% endblock %}
+{% block content %}
+<section class="empty-state">
+  <p class="error-code">403</p>
+  <h1>无权访问</h1>
+  <p class="muted">当前账号没有访问该页面的权限。</p>
+  {% if user.is_authenticated %}
+  <a class="button button--primary" href="{% url 'portal:dashboard' %}">返回账户总览</a>
+  {% else %}
+  <a class="button button--primary" href="{% url 'portal:login' %}">前往登录</a>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="referrer" content="same-origin">
+  <title>{% block title %}AutoBuddy 控制台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/portal/style.css">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  {% if user.is_authenticated %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="{% url 'portal:dashboard' %}">
+        <span class="brand-mark" aria-hidden="true">AB</span>
+        <span class="brand-text">AutoBuddy <span class="brand-sub">控制台</span></span>
+      </a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="{% url 'portal:dashboard' %}"{% if request.resolver_match.url_name == "dashboard" %} aria-current="page"{% endif %}>账户总览</a>
+        <a href="{% url 'portal:account_create' %}"{% if request.resolver_match.url_name == "account_create" %} aria-current="page"{% endif %}>添加账户</a>
+      </nav>
+      <div class="user-menu">
+        <span class="user-name" title="当前管理员">{{ user.get_username }}</span>
+        <form method="post" action="{% url 'portal:logout' %}" class="inline-form">
+          {% csrf_token %}
+          <button class="button button--quiet button--small" type="submit">退出登录</button>
+        </form>
+      </div>
+    </div>
+  </header>
+  {% endif %}
+
+  <main id="main" class="site-main{% if not user.is_authenticated %} site-main--auth{% endif %}">
+    {% if messages %}
+    <ul class="messages" aria-live="polite">
+      {% for message in messages %}
+      <li class="message message--{{ message.tags|default:'info' }}">{{ message }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <span>AutoBuddy · 自动签到控制台</span>
+    {% if app_version %}<span class="footer-version">v{{ app_version }}</span>{% endif %}
+  </footer>
+</body>
+</html>

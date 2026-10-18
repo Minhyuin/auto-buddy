@@ -1,0 +1,23 @@
+{% extends "portal/base.html" %}
+{% block title %}编辑执行计划 · {{ account.label }} · AutoBuddy{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow">执行计划</p>
+    <h1>{{ account.label }}</h1>
+    <p class="muted">调整每日签到时间、轮询频率与账户时区。</p>
+  </div>
+  <a class="button button--quiet" href="{% url 'portal:account_detail' account.pk %}">返回账户</a>
+</div>
+
+<section class="panel form-panel">
+  <form method="post" action="{% url 'portal:account_schedule' account.pk %}" class="form-stack">
+    {% csrf_token %}
+    {% include "portal/_form.html" with form=form %}
+    <div class="form-actions">
+      <button class="button button--primary" type="submit">保存计划</button>
+      <a class="button button--quiet" href="{% url 'portal:account_detail' account.pk %}">取消</a>
+    </div>
+  </form>
+</section>
+{% endblock %}
