@@ -8,6 +8,7 @@ app_name = "portal"
 
 urlpatterns = [
     path("login/", views.login_view, name="login"),
+    path("setup/", views.setup_view, name="setup"),
     path("logout/", views.logout_view, name="logout"),
     path("", views.dashboard, name="dashboard"),
     path("accounts/new/", views.account_create, name="account_create"),

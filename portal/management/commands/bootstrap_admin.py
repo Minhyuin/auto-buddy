@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model, password_validation
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from portal.models import WorkerState
 
 class Command(BaseCommand):
     help = 'Interactively create/reset the single administrator; no credentials in arguments or files.'
@@ -20,6 +21,9 @@ class Command(BaseCommand):
         except ValidationError as exc:
             raise CommandError('；'.join(exc.messages)) from None
         with transaction.atomic():
+            # Serialize with the web first-setup flow, which takes this same
+            # row lock before checking whether any user already exists.
+            WorkerState.objects.select_for_update().get_or_create(key='main')
             users = list(User.objects.select_for_update().all())
             if any(item.username != username for item in users):
                 raise CommandError('系统已存在其他管理员，请先人工核查；不允许创建第二个用户')

@@ -73,6 +73,8 @@ docker compose --env-file deployment/runtime.env up -d --build
 docker compose --env-file deployment/runtime.env exec web python manage.py bootstrap_admin
 ```
 
+管理员也可在首次进入网页时交互创建：此模式默认关闭，仅支持通过 SSH 隧道访问的回环 HTTPS 部署，由主机管理员短时开启 `INITIAL_SETUP_DEADLINE`（最长 30 分钟窗口）。创建成功或已有任何用户后立即关闭，不提供公开注册；完整启用和关闭步骤见部署手册。密码仅在受保护的网页中输入，不写入命令、配置或仓库。
+
 维护命令通过容器运行，不需要在主机另装 Python 依赖：
 
 ```sh

@@ -4,7 +4,7 @@ Documentation=file:///opt/auto-buddy/deployment/README.md
 
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=5min
+OnUnitActiveSec=15min
 RandomizedDelaySec=60
 AccuracySec=30s
 Persistent=true

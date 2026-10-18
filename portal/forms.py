@@ -15,8 +15,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django import forms
 from django.conf import settings
-from django.contrib.auth.forms import AuthenticationForm
+from django.contrib.auth import get_user_model
+from django.contrib.auth.forms import AuthenticationForm, UserCreationForm
 from django.core.exceptions import ValidationError
+from django.core.validators import MinLengthValidator
 
 from .models import Account
 from .services import normalize_session
@@ -336,3 +338,51 @@ class PortalAuthenticationForm(AuthenticationForm):
         "invalid_login": "账号或密码不正确。",
         "inactive": "该账号不可用，请联系系统管理员。",
     }
+
+
+class NeverEchoPasswordInput(forms.PasswordInput):
+    """A password input that never re-renders a submitted or initial value."""
+
+    def __init__(self, attrs=None):
+        super().__init__(attrs=attrs, render_value=False)
+
+    def format_value(self, value):  # noqa: ARG002 - value is intentionally discarded
+        return ""
+
+
+class InitialSetupForm(UserCreationForm):
+    """Create the single administrator during the one-time setup window.
+
+    Username validation comes from the user model field (which
+    ``UserCreationForm`` builds through ``UsernameField``); password validation
+    uses every configured ``AUTH_PASSWORD_VALIDATORS`` entry.  The password
+    widgets discard their value even after a failed POST, so an error response
+    can never echo the submitted secret.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        username = self.fields["username"]
+        username.label = "管理员账号"
+        username.widget.attrs.update(
+            {
+                "class": "input",
+                "autocomplete": "username",
+                "placeholder": "请输入管理员账号",
+            }
+        )
+        password_attrs = {"class": "input", "autocomplete": "new-password"}
+        password1 = self.fields["password1"]
+        password1.label = "管理员密码"
+        password1.min_length = 12
+        password1.validators.append(MinLengthValidator(12))
+        password1.widget = NeverEchoPasswordInput(attrs=password_attrs)
+        password1.help_text = "至少 12 个字符，不能是常见密码或纯数字。"
+        password2 = self.fields["password2"]
+        password2.label = "确认密码"
+        password2.widget = NeverEchoPasswordInput(attrs=dict(password_attrs))
+        password2.help_text = "请再次输入相同的密码。"
+
+    class Meta(UserCreationForm.Meta):
+        model = get_user_model()
+        fields = ("username",)

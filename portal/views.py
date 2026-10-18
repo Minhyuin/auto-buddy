@@ -11,23 +11,32 @@ from __future__ import annotations
 import hashlib
 from datetime import timedelta
 from functools import wraps
+from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import logout as auth_logout
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .crypto import CredentialError, decrypt
-from .forms import AccountForm, PortalAuthenticationForm, ScheduleForm
+from .forms import (
+    AccountForm,
+    InitialSetupForm,
+    PortalAuthenticationForm,
+    ScheduleForm,
+)
 from .models import Account, LoginAttempt, Run, WorkerState
 from .services import audit, enqueue_account, next_daily, save_account
 
@@ -36,6 +45,14 @@ LOGIN_WINDOW = timedelta(minutes=15)
 LOGIN_BLOCK = timedelta(minutes=15)
 WORKER_LEASE_SECONDS = 720
 ACTIVE_RUN_STATUSES = ("queued", "running")
+
+# The first-run administrator setup is a deliberately narrow, loopback-only
+# escape hatch for a fresh deployment: it is reachable only while the configured
+# deadline is at most 30 minutes away, refuses any non-loopback Host, and refuses
+# to run once any user exists.
+INITIAL_SETUP_WINDOW_SECONDS = 1800
+INITIAL_SETUP_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+INITIAL_SETUP_AUDIT_ACTION = "admin.initial_setup"
 
 
 def _login_key(request):
@@ -109,11 +126,48 @@ def _worker_context():
     return {"worker": worker, "worker_online": online}
 
 
+def _initial_setup_deadline():
+    deadline = getattr(settings, "INITIAL_SETUP_DEADLINE", 0)
+    if isinstance(deadline, bool) or not isinstance(deadline, int):
+        return 0
+    return deadline
+
+
+def _initial_setup_window_open(now=None):
+    """True only while the configured unix deadline is at most 30 minutes away."""
+    deadline = _initial_setup_deadline()
+    if deadline <= 0:
+        return False
+    now = now or timezone.now()
+    return 0 < deadline - now.timestamp() <= INITIAL_SETUP_WINDOW_SECONDS
+
+
+def _request_hostname(request):
+    # Calling get_host() first keeps Django's normal DisallowedHost behaviour.
+    try:
+        hostname = urlsplit(f"//{request.get_host()}").hostname
+    except ValueError:
+        # A malformed Host header is simply not a loopback host.
+        return ""
+    return (hostname or "").lower()
+
+
+def _initial_setup_allowed(request, now=None):
+    """The setup entry only opens for loopback, a fresh database and a live window."""
+    if not _initial_setup_window_open(now):
+        return False
+    if _request_hostname(request) not in INITIAL_SETUP_HOSTS:
+        return False
+    return not get_user_model().objects.exists()
+
+
 @never_cache
 @require_http_methods(["GET", "POST"])
 def login_view(request):
     if request.user.is_authenticated:
         return redirect(settings.LOGIN_REDIRECT_URL)
+    if request.method == "GET" and _initial_setup_allowed(request):
+        return redirect("portal:setup")
 
     next_url = request.POST.get("next") or request.GET.get("next") or ""
     key = _login_key(request)
@@ -144,6 +198,36 @@ def login_view(request):
         "portal/login.html",
         _base_context(form=form, next=next_url),
     )
+
+
+@sensitive_post_parameters("password1", "password2")
+@never_cache
+@require_http_methods(["GET", "POST"])
+def setup_view(request):
+    """Create the one administrator, once, inside the deployment's setup window."""
+    if not _initial_setup_allowed(request):
+        raise Http404("初始化入口未开放。")
+
+    form = InitialSetupForm(request.POST if request.method == "POST" else None)
+
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            # Serialize every setup attempt on the worker's singleton row.  The
+            # "any user yet?" check must happen after the lock, otherwise two
+            # requests could both see an empty table and create two admins.
+            WorkerState.objects.select_for_update().get_or_create(key="main")
+            if not _initial_setup_allowed(request):
+                raise Http404("初始化入口未开放。")
+            user = form.save(commit=False)
+            user.is_active = True
+            user.is_staff = True
+            user.is_superuser = True
+            user.save()
+            audit(user, INITIAL_SETUP_AUDIT_ACTION)
+        auth_login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        return redirect(settings.LOGIN_REDIRECT_URL)
+
+    return render(request, "portal/setup.html", _base_context(form=form))
 
 
 @require_POST

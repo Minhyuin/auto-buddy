@@ -1,0 +1,47 @@
+{% extends "portal/base.html" %}
+{% block title %}首次初始化 · AutoBuddy{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+{% block content %}
+<section class="auth-card" aria-labelledby="setup-title">
+  <div class="auth-brand">
+    <span class="brand-mark brand-mark--large" aria-hidden="true">AB</span>
+    <p class="eyebrow">AutoBuddy</p>
+    <h1 id="setup-title">首次初始化管理员</h1>
+    <p class="muted">仅在部署设置的短时间窗口内、且系统中还没有任何用户时可用。创建成功后该入口立即关闭，并且只允许存在一个管理员账号。</p>
+  </div>
+
+  <form method="post" action="{% url 'portal:setup' %}" class="form-stack" autocomplete="off">
+    {% csrf_token %}
+
+    {% if form.non_field_errors %}
+    <div class="form-errors" role="alert">
+      {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="field{% if form.username.errors %} field--error{% endif %}">
+      <label for="{{ form.username.id_for_label }}">管理员账号</label>
+      {{ form.username }}
+      {% if form.username.help_text %}<p class="help-text">{{ form.username.help_text }}</p>{% endif %}
+      {% for error in form.username.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+
+    <div class="field{% if form.password1.errors %} field--error{% endif %}">
+      <label for="{{ form.password1.id_for_label }}">管理员密码</label>
+      {{ form.password1 }}
+      {% if form.password1.help_text %}<p class="help-text">{{ form.password1.help_text }}</p>{% endif %}
+      {% for error in form.password1.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+
+    <div class="field{% if form.password2.errors %} field--error{% endif %}">
+      <label for="{{ form.password2.id_for_label }}">确认密码</label>
+      {{ form.password2 }}
+      {% if form.password2.help_text %}<p class="help-text">{{ form.password2.help_text }}</p>{% endif %}
+      {% for error in form.password2.errors %}<p class="field-error" role="alert">{{ error }}</p>{% endfor %}
+    </div>
+
+    <button class="button button--primary button--wide" type="submit">创建管理员并登录</button>
+    <p class="form-note">密码不会回显，也不会写入日志或审计记录。请使用独立于其他系统的强密码。</p>
+  </form>
+</section>
+{% endblock %}

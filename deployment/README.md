@@ -214,8 +214,21 @@ local build.
    docker compose ... exec web python manage.py bootstrap_admin
    ```
 
-   The command is interactive and is the only supported way to create the
-   initial account. Do not add a public bootstrap endpoint.
+   This interactive command remains the default for a public-domain deployment;
+   passwords are never command-line arguments or source defaults.
+
+   Alternatively, a **loopback HTTPS deployment reached through an SSH tunnel**
+   can use the first-visit web form. This is not a public registration endpoint:
+   bind every published Caddy port to `127.0.0.1`, use `localhost` as the site
+   hostname, and only then set `INITIAL_SETUP_DEADLINE` in the external runtime
+   env file to the current Unix time plus 900 seconds. Recreate the web container
+   with that env file. Do not enable this mode on a shared/untrusted host or a
+   public listener. The login page redirects to setup only while that deadline
+   is at most 1800 seconds in the future and there are no users. Enter a username,
+   password and confirmation in the CSRF-protected form; success creates the sole
+   administrator and signs in. Any existing user permanently closes the form,
+   even if the deadline has not expired. Set the external deadline back to `0`
+   and recreate web after use. Do not send passwords to chat, URLs or shell history.
 
 6. Confirm the public site and `/health/`, and that the loopback listener at
    `http://127.0.0.1:8080/health/` returns Django's 503 when the database is
@@ -232,6 +245,12 @@ The updater does this internally; for manual operations export:
 export SECRETS_DIR=/etc/auto-buddy/secrets
 export RUNTIME_ENV_FILE=/etc/auto-buddy/runtime.env
 export COMPOSE_PROJECT_NAME=auto-buddy
+# After baseline/automatic upgrades, preserve the actually deployed release.
+# runtime.env may still describe the image used for the original installation.
+if [ -f /var/lib/auto-buddy/updater/current.json ]; then
+  export APP_IMAGE="$(python3 -c 'import json; print(json.load(open("/var/lib/auto-buddy/updater/current.json"))["image"])')"
+  export APP_VERSION="$(python3 -c 'import json; print(json.load(open("/var/lib/auto-buddy/updater/current.json"))["tag"])')"
+fi
 
 docker compose --project-directory /opt/auto-buddy \
   -f /opt/auto-buddy/compose.yaml --env-file "$RUNTIME_ENV_FILE" ps

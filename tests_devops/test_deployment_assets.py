@@ -203,7 +203,7 @@ class SystemdAndInstallerTests(unittest.TestCase):
         text = read("deployment/systemd/auto-buddy-updater.timer")
         for entry in (
             "OnBootSec=3min",
-            "OnUnitActiveSec=5min",
+            "OnUnitActiveSec=15min",
             "RandomizedDelaySec=60",
             "Persistent=true",
             "Unit=auto-buddy-updater.service",
