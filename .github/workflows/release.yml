@@ -287,16 +287,21 @@ jobs:
         env:
           VERSION: ${{ needs.version.outputs.version }}
           IMAGE_DIGEST: ${{ needs.build.outputs.digest }}
-          MANIFEST_SHA: ${{ hashFiles('release-manifest.json') }}
         run: |
           set -euo pipefail
           python scripts/release_manifest.py validate --manifest release-manifest.json
-          test "$(cat manifest.sha256)" = "$MANIFEST_SHA"
           python - <<'PY'
-          import json, os
-          manifest = json.load(open("release-manifest.json", encoding="utf-8"))
-          assert manifest["version"] == os.environ["VERSION"], manifest["version"]
-          assert manifest["image"]["digest"] == os.environ["IMAGE_DIGEST"], manifest["image"]["digest"]
+          import hashlib, json, os
+          from pathlib import Path
+          raw = Path("release-manifest.json").read_bytes()
+          expected = Path("manifest.sha256").read_text(encoding="utf-8").strip()
+          if hashlib.sha256(raw).hexdigest() != expected:
+              raise SystemExit("Release manifest SHA-256 mismatch")
+          manifest = json.loads(raw)
+          if manifest["version"] != os.environ["VERSION"]:
+              raise SystemExit("Release manifest version mismatch")
+          if manifest["image"]["digest"] != os.environ["IMAGE_DIGEST"]:
+              raise SystemExit("Release manifest image digest mismatch")
           PY
       - name: Promote immutable digest to version, stable and latest
         env:

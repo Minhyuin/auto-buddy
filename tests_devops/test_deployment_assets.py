@@ -7,10 +7,15 @@ exercises for real where a Linux runner is available.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
+import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -359,6 +364,34 @@ class WorkflowTests(unittest.TestCase):
         self.assertLess(text.index("docker buildx imagetools create"), text.index("gh release create"))
         self.assertIn("stable", text)
         self.assertIn("latest", text)
+
+    def test_release_promotion_checks_actual_manifest_bytes(self) -> None:
+        workflow = load_yaml(".github/workflows/release.yml")
+        step = next(item for item in workflow["jobs"]["publish"]["steps"]
+                    if item.get("name") == "Validate manifest and promotion inputs")
+        self.assertNotIn("hashFiles", json.dumps(step))
+        code = step["run"].split("python - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+        expected_version = "v1.2.3"
+        expected_digest = "sha256:" + "a" * 64
+        for defect in (None, "checksum", "version", "image"):
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as directory:
+                manifest = {"version": expected_version, "image": {"digest": expected_digest}}
+                if defect == "version":
+                    manifest["version"] = "v1.2.4"
+                if defect == "image":
+                    manifest["image"]["digest"] = "sha256:" + "b" * 64
+                raw = json.dumps(manifest).encode()
+                root = Path(directory)
+                (root / "release-manifest.json").write_bytes(raw)
+                checksum = "0" * 64 if defect == "checksum" else hashlib.sha256(raw).hexdigest()
+                (root / "manifest.sha256").write_text(checksum + "\n", encoding="utf-8")
+                with contextlib.chdir(root), patch.dict(os.environ, {"VERSION": expected_version,
+                                                                     "IMAGE_DIGEST": expected_digest}):
+                    if defect:
+                        with self.assertRaisesRegex(SystemExit, "mismatch"):
+                            exec(compile(code, "release-promotion", "exec"), {})
+                    else:
+                        exec(compile(code, "release-promotion", "exec"), {})
 
     def test_upstream_sync_updates_only_the_gitlink(self) -> None:
         workflow = load_yaml(".github/workflows/upstream-sync.yml")
