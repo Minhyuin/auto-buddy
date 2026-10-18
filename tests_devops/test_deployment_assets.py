@@ -331,7 +331,7 @@ class WorkflowTests(unittest.TestCase):
             "path.chmod(0o444)",
             "root.mkdir(mode=0o700)",
             "container can read all file secrets",
-            "trivy-action",
+            "trivy-action@v0.36.0",
             "workbuddy-auto-signin",
             "python -m unittest discover -s tests",
         ):
