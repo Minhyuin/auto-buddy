@@ -1,6 +1,6 @@
 # Direct runtime dependencies pinned for reproducible release inputs.
 Django==5.2.18
-cryptography==46.0.7
+cryptography==50.0.2
 psycopg[binary]==3.3.6
 gunicorn==23.0.0
 whitenoise==6.12.0
