@@ -23,7 +23,7 @@ def normalize_session(value):
         raise ValueError('缺少 auth 或 account 对象')
     token, uid = auth.get('accessToken'), account.get('uid')
     if isinstance(token, dict):
-        raise ValueError('检测到客户端加密信封中的 accessToken（$wbEncrypted 等）。仅上传 .info 无法在服务器解密；请在安装对应客户端的 Windows 本机解密后导入，或使用兼容的明文 CLI 会话。不要将 envelope 当作 Token。')
+        raise ValueError('检测到客户端加密信封中的 accessToken（$wbEncrypted 等）。本入口仅支持 CodeBuddy 明文会话，不提供本机或服务器解密适配。请重新选择包含明文 accessToken 的 CodeBuddy 凭据文件，不要将 envelope 当作 Token。')
     if isinstance(token, str) and token.strip().lower() in {'xx', 'xxx', 'redacted'}:
         raise ValueError('accessToken 是脱敏占位值，不能恢复为真实凭据；请在安全连接下导入原始有效凭据。')
     if not isinstance(token, str) or not 0 < len(token) <= 32768 or not TOKEN_PATTERN.fullmatch(token):

@@ -219,7 +219,7 @@ class AccountForm(ScheduleForm):
                 "placeholder": '{"accessToken": "…", "uid": "…"}',
             }
         ),
-        help_text="支持简化 JSON，或 CodeBuddy / WorkBuddy 原生 auth/account JSON；自动提取必要字段，不保存 refreshToken 或个人资料。",
+        help_text="支持简化 JSON，或 CodeBuddy 原生 auth/account JSON；自动提取必要字段，不保存 refreshToken 或个人资料。",
     )
     credentials_file = forms.FileField(
         label="或上传原始 .info / .json 凭据文件",
@@ -227,7 +227,7 @@ class AccountForm(ScheduleForm):
         widget=forms.ClearableFileInput(
             attrs={"class": "file-input", "accept": ".info,.json,application/json"}
         ),
-        help_text="直接选择 Tencent-Cloud.coding-copilot.info 或 workbuddy-desktop.info，无需改名或手工整理。最大 64 KB，支持 UTF-8 BOM；仅提取当前 account 与明文 accessToken。$wbEncrypted 需本机处理，xx 占位值不能登录。文件内容不会回显。",
+        help_text="直接选择 CodeBuddy 的 Tencent-Cloud.coding-copilot.info，无需改名或手工整理。最大 64 KB，支持 UTF-8 BOM；仅提取当前 account 与明文 accessToken。不支持加密 accessToken，xx 占位值不能登录。文件内容不会回显。",
     )
 
     field_order = [
@@ -297,6 +297,8 @@ class AccountForm(ScheduleForm):
         upload = cleaned.get("credentials_file")
         if text and upload:
             self.add_error("credentials", "请只提供一种凭据输入方式：粘贴 JSON 或上传文件。")
+            cleaned["credentials_file"] = None
+            self._file_bytes = None
             cleaned["session"] = None
             return cleaned
         if not text and not upload:

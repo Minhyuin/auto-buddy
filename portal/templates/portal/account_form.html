@@ -17,11 +17,11 @@
 
     <p class="form-note">
       {% if is_create %}
-      可直接上传 CodeBuddy / WorkBuddy 原始 <span class="mono">.info</span> 文件，自动提取当前账户的必要字段；也支持简化 JSON。无需导出或手工复制 Token。
+      可直接上传 CodeBuddy 的 <span class="mono">Tencent-Cloud.coding-copilot.info</span> 原始文件，自动提取当前账户的必要字段；也支持简化 JSON。无需改名或手工复制 Token。
       {% else %}
       编辑时凭据输入留空，表示沿用现有凭据；如需替换，请粘贴 JSON 或上传文件。
       {% endif %}
-      文件与文本内容均不会回显；refreshToken、昵称、手机号及其他账户列表不会保存。若 Token 为 $wbEncrypted，必须先在对应客户端本机处理，仅上传密文无法登录。
+      文件与文本内容均不会回显；refreshToken、昵称、手机号及其他账户列表不会保存。仅支持明文 accessToken，不支持加密信封或 xx 等脱敏占位值。
     </p>
     {% if not request.is_secure %}
     <p class="form-note" role="alert">当前连接不是 HTTPS。凭据上传会明文经过网络，请先配置 HTTPS 或通过可信加密通道访问。</p>

@@ -1,4 +1,4 @@
-"""Django tests for importing native CodeBuddy / WorkBuddy ``.info`` files.
+"""Django tests for importing native CodeBuddy ``.info`` files.
 
 Every fixture in this module is synthetic and built in-process.  The tests
 never read an operator's Downloads folder, client data directory or a real
@@ -25,7 +25,7 @@ User = get_user_model()
 
 TOKEN = "synthetic-info-access-token-abc123"
 UID = "synthetic-user-0001"
-DOMAIN = "synthetic-workbuddy.example"
+DOMAIN = "synthetic-codebuddy.example"
 REFRESH_TOKEN = "synthetic-refresh-token-must-not-persist"
 NICKNAME = "synthetic-nickname-must-not-persist"
 PHONE = "00000000000"
@@ -60,8 +60,8 @@ def codebuddy_native():
     }
 
 
-def workbuddy_native():
-    """Synthetic WorkBuddy document whose irrelevant fields are envelopes."""
+def codebuddy_native_with_encrypted_metadata():
+    """Synthetic CodeBuddy document with encrypted irrelevant metadata."""
     return {
         "auth": {
             "accessToken": TOKEN,
@@ -111,14 +111,14 @@ class InfoImportTestBase(TestCase):
         payload.update(overrides)
         return payload
 
-    def upload(self, content, *, filename="workbuddy-desktop.info"):
+    def upload(self, content, *, filename="Tencent-Cloud.coding-copilot.info"):
         if isinstance(content, str):
             content = content.encode("utf-8")
         return SimpleUploadedFile(
             filename, content, content_type="application/octet-stream"
         )
 
-    def post_upload(self, content, *, filename="workbuddy-desktop.info", **overrides):
+    def post_upload(self, content, *, filename="Tencent-Cloud.coding-copilot.info", **overrides):
         payload = self.create_payload(**overrides)
         payload["credentials"] = ""
         payload["credentials_file"] = self.upload(content, filename=filename)
@@ -156,6 +156,13 @@ class NativeInfoImportTests(InfoImportTestBase):
         self.assertIsNotNone(tag)
         self.assertIn(".info", tag.group(0))
 
+    def test_create_page_prompts_codebuddy_only(self):
+        response = self.client.get(reverse("portal:account_create"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CodeBuddy")
+        self.assertContains(response, "Tencent-Cloud.coding-copilot.info")
+        self.assertNotContains(response, "workbuddy-desktop.info")
+
     def test_codebuddy_info_upload_persists_minimal_canonical_session(self):
         response = self.post_upload(
             json.dumps(codebuddy_native()),
@@ -182,8 +189,8 @@ class NativeInfoImportTests(InfoImportTestBase):
         ):
             self.assertNotIn(discarded, stored)
 
-    def test_workbuddy_info_with_encrypted_metadata_imports_without_decrypting(self):
-        response = self.post_upload(json.dumps(workbuddy_native()))
+    def test_encrypted_irrelevant_metadata_is_discarded_without_decrypting(self):
+        response = self.post_upload(json.dumps(codebuddy_native_with_encrypted_metadata()))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.persisted_session(), canonical_session())
 
@@ -216,7 +223,7 @@ class NativeInfoImportTests(InfoImportTestBase):
         document = json.dumps(native)
         for filename in (
             "Tencent-Cloud.coding-copilot.info",
-            "workbuddy-desktop.info",
+            "renamed-copy.info",
             "credentials.json",
         ):
             with self.subTest(filename=filename):
@@ -302,3 +309,30 @@ class NativeInfoImportTests(InfoImportTestBase):
         self.assertNotIn(TOKEN, html)
         self.assertNotIn(REFRESH_TOKEN, html)
         self.assertEqual(Account.objects.count(), 0)
+
+    def test_dual_input_cleanup_never_echoes_or_retains_secrets(self):
+        text_token = "synthetic-dual-text-token-123"
+        file_token = "synthetic-dual-file-token-456"
+        text_document = json.dumps({"accessToken": text_token, "uid": UID})
+        native = codebuddy_native()
+        native["auth"]["accessToken"] = file_token
+        file_document = json.dumps(native)
+
+        payload = self.create_payload(credentials=text_document)
+        payload["credentials_file"] = self.upload(file_document)
+        response = self.client.post(reverse("portal:account_create"), payload)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("请只提供一种凭据输入方式", self.field_errors(response, "credentials"))
+        form = response.context["form"]
+        self.assertIsNone(form.cleaned_data.get("credentials"))
+        self.assertIsNone(form.cleaned_data.get("credentials_file"))
+        self.assertIsNone(form._file_bytes)
+
+        html = response.content.decode()
+        self.assertNotIn(text_token, html)
+        self.assertNotIn(file_token, html)
+        self.assertNotIn(text_token, str(form.cleaned_data))
+        self.assertNotIn(file_token, str(form.cleaned_data))
+        self.assertEqual(Account.objects.count(), 0)
+        self.assertEqual(AuditEvent.objects.count(), 0)
